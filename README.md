@@ -1,5 +1,7 @@
 # Grabble Solver
 
+![Terminal screenshot](./screenshot.png)
+
 Grabble is a fast-paced word game where players take it in turns to flip over tiles, form words, and steal words from other players. Grabble Solver is a Python-based tool that helps you solve word puzzles by finding possible and potential words from a given set of letters and existing words.
 
 ## Grabble Rules

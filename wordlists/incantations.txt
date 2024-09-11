@@ -14,9 +14,7 @@ Nox
 Lumos
 Solem
 Oculus
-Reparo
 Papyrus
-Reparo
 Reparo
 Spongify
 Sternius
@@ -29,7 +27,8 @@ Anapneo
 Aparecium
 Arania
 Exumai
-Crinus Muto
+Crinus
+Muto
 Engorgio
 Epoximise
 Everte
