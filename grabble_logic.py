@@ -142,7 +142,7 @@ def get_potential_words(pool: List[str], wordlist: Set[str], existing_words: Lis
             if len(word) > len(existing_word):
                 word_counter = Counter(word)
                 missing = word_counter - combined_counter
-                if sum(missing.values()) == 1:
+                if sum(missing.values()) == 1 and all(c in word_counter for c in existing_word):
                     letter = list(missing.keys())[0]
                     if letter not in potential:
                         potential[letter] = []

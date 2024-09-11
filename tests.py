@@ -37,6 +37,7 @@ class TestGrabbleLogic(unittest.TestCase):
         combined_counter = Counter(self.sample_pool + list('fish'))
         self.assertTrue(check_word_with_existing('catfish', 'fish', combined_counter))
         self.assertFalse(check_word_with_existing('nulfish', 'fish', combined_counter))
+        self.assertFalse(check_word_with_existing('catfis', 'fish', combined_counter))
 
     def test_get_missing_letter(self):
         pool_counter = Counter(self.sample_pool)
