@@ -34,7 +34,7 @@ When no more words can be found, the game is scored by counting the first three 
 
 1. Clone the repository:
    ```
-   git clone https://github.com/yourusername/grabble-solver.git
+   git clone https://github.com/felixpackard/grabble-solver.git
    cd grabble-solver
    ```
 
