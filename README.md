@@ -77,6 +77,10 @@ The interface will guide you through the following steps:
 - `tests.py`: Unit tests for the core logic
 - `wordlists/`: Directory containing wordlist files
 
+## Disclaimer
+
+The initial prototype of this was written in a few hours almost entirely using AI, and as such is not very efficient, but was enough to solve my specific use case with a small wordlist. When I have some more time I'll refactor it to make it more efficient for larger wordlists.
+
 ## Testing
 
 To run the tests:
