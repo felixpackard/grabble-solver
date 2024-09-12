@@ -59,9 +59,9 @@ class TestGrabbleLogic(unittest.TestCase):
     def test_get_possible_words(self):
         state = GameState()
 
-        state.add_existing_word('fish')
-        state.pool = ['c', 'a', 't', 'd', 'o', 'z']
-        state.load_words(['cat', 'dog', 'catfish', 'zoo'])
+        state.add_existing_words(['fish', 'bladdered'])
+        state.add_letters('catdozhl')
+        state.load_words(['cat', 'dog', 'catfish', 'zoo', 'bladdered', 'bethralled'])
         
         possible = state.get_possible_words()
 
@@ -71,12 +71,13 @@ class TestGrabbleLogic(unittest.TestCase):
         self.assertIn('catfish', possible_words)
         self.assertNotIn('dog', possible_words)
         self.assertNotIn('zoo', possible_words)
+        self.assertNotIn('bethralled', possible_words)
 
     def test_get_potential_words(self):
         state = GameState()
-        state.add_existing_words(['fish', 'dog'])
-        state.add_letters('catdoz')
-        state.load_words(['dog', 'dogfish', 'dogfiat'])
+        state.add_existing_words(['fish', 'dog', 'bladdered'])
+        state.add_letters('catdozh')
+        state.load_words(['dog', 'dogfish', 'dogfiat', 'bladdered', 'bethralled'])
         
         potential = state.get_potential_words()
 
@@ -88,6 +89,7 @@ class TestGrabbleLogic(unittest.TestCase):
         self.assertIn('dogfish', potential_words)
         self.assertNotIn('cat', potential_words)
         self.assertNotIn('dogfiat', potential_words)
+        self.assertNotIn('bethralled', potential_words)
 
 
 class TestSerializationDeserialization(unittest.TestCase):
@@ -130,7 +132,7 @@ class TestSerializationDeserialization(unittest.TestCase):
     def test_deserialize_non_alpha_characters(self):
         non_alpha_json = self.game_state.serialize()
         self.game_state.pool = ['a', 'b', 'c', '1', '2', '3', '!', '@', '#']
-        
+
         state = GameState()
         state.deserialize(non_alpha_json)
 

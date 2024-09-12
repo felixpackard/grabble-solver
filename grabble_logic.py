@@ -157,7 +157,6 @@ class GameState:
             raise ValueError("Trie is empty. Make sure the wordlist is loaded.")
 
         possible: List[Word] = []
-        pool_bits = self.calculate_word_bits(''.join(self.pool))
         
         # Find anagrams from the pool
         for word in anagram(self, self.pool):
@@ -166,14 +165,17 @@ class GameState:
         # Check for words that can be formed using existing words
         for existing_word in self.existing_words:
             existing_bits = self.existing_word_bits[existing_word]
-            combined_bits = pool_bits | existing_bits
+            existing_counter = self.existing_word_counters[existing_word]
             combined_letters = self.pool + list(existing_word)
             for word in anagram(self, combined_letters):
                 word_bits = self.word_bits[word]
                 if len(word) > len(existing_word) and (word_bits & existing_bits) == existing_bits:
-                    new_letters = [l for l in word if l in self.pool and self.letter_to_bit[l] & (word_bits & ~existing_bits)]
-                    if new_letters:  # Ensure at least one letter from the pool is used
-                        possible.append(Word(word, existing_word, new_letters))
+                    # Quick check passed, now verify letter frequencies
+                    word_counter = Counter(word)
+                    if all(word_counter[letter] >= count for letter, count in existing_counter.items()):
+                        new_letters = [l for l in word if l in self.pool and word_counter[l] > existing_counter[l]]
+                        if new_letters:  # Ensure at least one letter from the pool is used
+                            possible.append(Word(word, existing_word, new_letters))
         
         return sorted(possible, key=len, reverse=True)
 
@@ -209,23 +211,28 @@ class GameState:
                     new_word = Word(word, existing_word, new_letters)
                     potential_words.setdefault(missing_letter, []).append(new_word)
 
-        # Check potential words from the pool
-        for letter in set(SCRABBLE_LETTER_FREQUENCY.keys()) - set(self.pool):
-            temp_pool = self.pool + [letter]
-            temp_pool_bits = pool_bits | self.letter_to_bit[letter]
-            for word in anagram(self, temp_pool):
-                check_and_add_word(word, pool_bits)
+        # Check potential words from the pool and existing words
+        letters_checked = 0
+        for letter, _ in sorted(SCRABBLE_LETTER_FREQUENCY.items(), key=lambda x: x[1], reverse=True):
+            if letter not in self.pool:
+                # Check potential words from the pool
+                temp_pool = self.pool + [letter]
+                for word in anagram(self, temp_pool):
+                    check_and_add_word(word, pool_bits)
 
-        # Check potential words from existing words
-        for existing_word in self.existing_words:
-            combined_bits = pool_bits | self.existing_word_bits[existing_word]
-            combined_letters = self.pool + list(existing_word)
-            for letter in set(SCRABBLE_LETTER_FREQUENCY.keys()) - set(combined_letters):
-                temp_combined = combined_letters + [letter]
-                temp_combined_bits = combined_bits | self.letter_to_bit[letter]
-                for word in anagram(self, temp_combined):
-                    if len(word) > len(existing_word):
-                        check_and_add_word(word, combined_bits, existing_word)
+                # Check potential words from existing words
+                for existing_word in self.existing_words:
+                    combined_letters = self.pool + list(existing_word)
+                    if letter not in combined_letters:
+                        temp_combined = combined_letters + [letter]
+                        combined_bits = pool_bits | self.existing_word_bits[existing_word]
+                        for word in anagram(self, temp_combined):
+                            if len(word) > len(existing_word):
+                                check_and_add_word(word, combined_bits, existing_word)
+
+                letters_checked += 1
+                if letters_checked >= 11:
+                    break
 
         # Sort word lists by length in descending order
         for letter in potential_words:

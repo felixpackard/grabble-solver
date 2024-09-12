@@ -1,9 +1,10 @@
 import urwid
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from grabble_logic import (
     GameState, get_wordlists, Word
 )
 import pyperclip
+
 class GrabbleUI:
     def __init__(self) -> None:
         self.game_state = GameState()
@@ -77,26 +78,70 @@ class GrabbleUI:
         return layout
 
     def update_display(self) -> None:
+        """
+        Update all display components of the UI.
+        """
+
+        self._update_word_pool()
+        self._update_letter_pool()
+        self._update_potential_words()
+        self._update_possible_words()
+        self._update_actions()
+
+    def _update_word_pool(self) -> None:
+        """
+        Update the word pool display with the current existing words.
+        """
+
         self.word_pool.set_text(", ".join(self.game_state.existing_words))
+
+    def _update_letter_pool(self) -> None:
+        """
+        Update the letter pool display with the current available letters.
+        """
+
         self.letter_pool.set_text(" ".join(self.game_state.pool))
 
+    def _update_potential_words(self) -> None:
+        """
+        Update the potential words display, showing up to 10 letter groups.
+        """
+
         potential: Dict[str, List[Word]] = self.game_state.get_potential_words()
-        potential_text: List[List] = []
-        for i, (letter, words) in enumerate(potential.items()):
-            if i >= 10:
-                potential_text.append("\n")
-                potential_text.append("...")
-                break
-            word_list = [('potential_words', letter + ": ")]
+        potential_text: List[List[Tuple[str, str]]] = []
+        for i, (letter, words) in enumerate(list(potential.items())[:10]):
+            word_list: List[Tuple[str, str]] = [('potential_words', f"{letter}: ")]
             if words:
-                word_list.extend([('potential_words', str(words[0])), ", "])
-                word_list.extend([str(w) + ", " for w in words[1:3]])
-            if len(words) > 3:
-                word_list.append("...")
+                word_list.extend(self._format_word_list(words))
             potential_text.append(word_list)
-            if i < 9 and i < len(potential) - 1:  # Add line break if not the last item
+            if i < 9 and i < len(potential) - 1:
                 potential_text.append("\n")
+        if len(potential) > 10:
+            potential_text.append("\n...")
         self.potential_words.set_text(potential_text)
+
+    def _format_word_list(self, words: List[Word]) -> List[Tuple[str, str]]:
+        """
+        Format a list of words for display in the potential words section.
+
+        Args:
+            words (List[Word]): List of Word objects to format.
+
+        Returns:
+            List[Tuple[str, str]]: Formatted list of words with styling information.
+        """
+
+        formatted: List[Tuple[str, str]] = [('potential_words', str(words[0]))]
+        for w in words[1:3]:
+            formatted.extend([", ", str(w)])
+        if len(words) > 3:
+            formatted.append(", ...")
+        return formatted
+
+    def _update_possible_words(self) -> None:
+        """
+        Update the possible words display, showing up to 10 words.
+        """
 
         possible: List[Word] = self.game_state.get_possible_words()
         possible_text: List[str] = [f"{i+1}. {str(word)}" for i, word in enumerate(possible[:10])]
@@ -104,7 +149,19 @@ class GrabbleUI:
             possible_text.append("...")
         self.possible_words.original_widget.set_text("\n".join(possible_text))
 
-        actions_text: str = "a: Add Letter\nr: Remove Word\nd: Delete Letters\ni: Import State\ne: Export State\nq: Quit"
+    def _update_actions(self) -> None:
+        """
+        Update the actions display with available commands.
+        """
+
+        actions_text: str = (
+            "a: Add Letter\n"
+            "r: Remove Word\n"
+            "d: Delete Letters\n"
+            "i: Import State\n"
+            "e: Export State\n"
+            "q: Quit"
+        )
         self.actions.set_text(actions_text)
 
     def global_input(self, key: str) -> None:
@@ -217,6 +274,7 @@ class GrabbleUI:
 
 def run_grabble_ui() -> None:
     GrabbleUI()
+    print("Exiting...")
 
 if __name__ == "__main__":
     run_grabble_ui()
