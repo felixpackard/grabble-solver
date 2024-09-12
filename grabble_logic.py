@@ -1,14 +1,40 @@
 import os
 from collections import Counter
-from typing import Dict, Set, List, Optional, Tuple
+from typing import Dict, Set, List, Optional, Generator
 import json
 import base64
+import functools
 
 SCRABBLE_LETTER_FREQUENCY: Dict[str, int] = {
     'e': 12, 'a': 9, 'i': 9, 'o': 8, 'n': 6, 'r': 6, 't': 6, 'l': 4, 's': 4, 'u': 4,
     'd': 4, 'g': 3, 'b': 2, 'c': 2, 'm': 2, 'p': 2, 'f': 2, 'h': 2, 'v': 2, 'w': 2,
     'y': 2, 'k': 1, 'j': 1, 'x': 1, 'q': 1, 'z': 1
 }
+
+class TrieNode:
+    def __init__(self):
+        self.children = {}
+        self.is_word = False
+        self.word = None
+    
+    def __str__(self):
+        return json.dumps(self, default=lambda o: o.__dict__, indent=4)
+
+class Trie:
+    def __init__(self):
+        self.root = TrieNode()
+    
+    def __str__(self):
+        return self.root.__str__()
+
+    def insert(self, word: str):
+        node = self.root
+        for char in word:
+            if char not in node.children:
+                node.children[char] = TrieNode()
+            node = node.children[char]
+        node.is_word = True
+        node.word = word
 
 class Word:
     def __init__(self, word: str, existing_word: Optional[str] = None, pool_letters: Optional[List[str]] = None):
@@ -24,147 +50,220 @@ class Word:
             return f"{self.word} (from {self.existing_word})"
         return self.word
 
-def load_wordlist(path: str) -> Set[str]:
-    """
-    Load a wordlist from a file and return it as a set of lowercase words.
+class GameState:
+    def __init__(self):
+        self.pool: List[str] = []
+        self.existing_words: List[str] = []
+        self.trie = Trie()
+        self.word_bits: Dict[str, int] = {}
+        self.letter_to_bit = {chr(i + 97): 1 << i for i in range(26)}
+        self.existing_word_counters: Dict[str, Counter] = {}
+        self.existing_word_bits: Dict[str, int] = {}
 
-    Args:
-        path (str): The path to the wordlist file.
+    def debug_print(self):
+        """Print the game state for debugging."""
 
-    Returns:
-        Set[str]: A set containing all words from the file in lowercase.
-    """
-    with open(path, 'r') as file:
-        return set(word.strip().lower() for word in file)
+        print(f"Pool: {self.pool}")
+        print(f"Existing words: {self.existing_words}")
+        print(f"Trie: {self.trie}")
+        print(f"Word bits: {self.word_bits}")
+        print(f"Letter to bit: {self.letter_to_bit}")
 
-def check_word_against_pool(word: str, pool_counter: Counter) -> bool:
-    """
-    Check if a word can be formed using the letters in the pool.
+    def load_wordlist(self, path: str) -> None:
+        """Load all words from a wordlist file into the trie."""
 
-    Args:
-        word (str): The word to check.
-        pool_counter (Counter): A Counter object representing the available letters.
-
-    Returns:
-        bool: True if the word can be formed, False otherwise.
-    """
-    return not Counter(word) - pool_counter
-
-def check_word_with_existing(word: str, existing_word: str, combined_counter: Counter) -> bool:
-    """
-    Check if a new word can be formed by combining an existing word with letters from the pool.
-
-    Args:
-        word (str): The new word to check.
-        existing_word (str): An existing word to potentially combine with.
-        combined_counter (Counter): A Counter object representing the available letters including the existing word.
-
-    Returns:
-        bool: True if the new word can be formed, False otherwise.
-    """
-    word_counter = Counter(word)
-    if len(word) > len(existing_word) and not word_counter - combined_counter:
-        # Check if all letters of the existing word are used
-        return all(word_counter[letter] >= count for letter, count in Counter(existing_word).items())
-    return False
-
-def get_missing_letter(word: str, pool_counter: Counter) -> Optional[str]:
-    """
-    Find the single missing letter needed to form a word from the pool.
-
-    Args:
-        word (str): The word to check.
-        pool_counter (Counter): A Counter object representing the available letters.
-
-    Returns:
-        Optional[str]: The missing letter if only one is needed, None otherwise.
-    """
-    missing = Counter(word) - pool_counter
-    if sum(missing.values()) == 1:
-        return list(missing.keys())[0]
-    return None
-
-def get_possible_words(pool: List[str], wordlist: Set[str], existing_words: List[str]) -> List[Word]:
-    """
-    Get all possible words that can be formed from the pool and existing words.
-
-    Args:
-        pool (List[str]): List of available letters.
-        wordlist (Set[str]): Set of valid words.
-        existing_words (List[str]): List of words already formed.
-
-    Returns:
-        List[Word]: List of possible Word objects.
-    """
-    pool_counter = Counter(pool)
-    possible: List[Word] = [Word(word, pool_letters=[l for l in word if l in pool]) for word in wordlist if check_word_against_pool(word, pool_counter)]
+        with open(path, 'r') as file:
+            for word in file:
+                self.load_word(word)
     
-    for existing_word in existing_words:
-        combined_pool = pool + list(existing_word)
-        combined_counter = Counter(combined_pool)
-        for word in wordlist:
-            if check_word_with_existing(word, existing_word, combined_counter):
-                new_letters = [l for l in word if l in pool and l not in existing_word]
-                possible.append(Word(word, existing_word, new_letters))
+    def add_existing_words(self, words: List[str]) -> None:
+        """Add existing words to the game state."""
+
+        for word in words:
+            self.add_existing_word(word)
     
-    return sorted(possible, key=len, reverse=True)
+    def add_existing_word(self, word: str) -> None:
+        """Add an existing word to the game state."""
+        self.existing_words.append(word)
+        self.existing_word_counters[word] = Counter(word)
+        self.existing_word_bits[word] = self.calculate_word_bits(word)
 
-def get_potential_words(pool: List[str], wordlist: Set[str], existing_words: List[str]) -> Dict[str, List[Word]]:
-    """
-    Get potential words that can be formed by adding one letter to the pool or existing words.
+    def load_words(self, words: List[str]) -> None:
+        """Load a list of words into the trie."""
 
-    Args:
-        pool (List[str]): List of available letters.
-        wordlist (Set[str]): Set of valid words.
-        existing_words (List[str]): List of words already formed.
+        for word in words:
+            self.load_word(word)
 
-    Returns:
-        Dict[str, List[Word]]: Dictionary of potential Word objects, keyed by the missing letter.
-    """
-    pool_counter = Counter(pool)
-    potential: Dict[str, List[Word]] = {}
-    
-    for word in wordlist:
-        word_counter = Counter(word)
-        missing = word_counter - pool_counter
+    def load_word(self, word: str) -> None:
+        """Load a word into the trie."""
+
+        word = word.strip().lower()
+        self.trie.insert(word)
+        self.word_bits[word] = self.calculate_word_bits(word)
+
+    @functools.lru_cache(maxsize=1024)
+    def calculate_word_bits(self, word: str) -> int:
+        return functools.reduce(lambda x, y: x | y, (self.letter_to_bit[c] for c in word), 0)
+
+    def add_letters(self, letters: str) -> None:
+        """Add letters to the pool."""
+
+        for letter in letters:
+            self.add_letter(letter)
+
+    def add_letter(self, letter: str) -> None:
+        """Add a letter to the pool."""
+
+        self.pool.append(letter.lower())
+
+    def remove_word(self, word: Word) -> None:
+        """Remove a word from the game state."""
+
+        if word.existing_word:
+            self.existing_words.remove(word.existing_word)
+            del self.existing_word_counters[word.existing_word]
+            del self.existing_word_bits[word.existing_word]
         
-        if sum(missing.values()) == 1:
-            letter = list(missing.keys())[0]
-            if letter not in potential:
-                potential[letter] = []
-            potential[letter].append(Word(word, pool_letters=[l for l in word if l in pool]))
-    
-    # Check for potential words that can be made by combining pool letters with existing words
-    for existing_word in existing_words:
-        combined_pool = pool + list(existing_word)
-        combined_counter = Counter(combined_pool)
-        for word in wordlist:
-            if len(word) > len(existing_word):
-                word_counter = Counter(word)
-                missing = word_counter - combined_counter
-                if sum(missing.values()) == 1 and all(c in word_counter for c in existing_word):
-                    letter = list(missing.keys())[0]
-                    if letter not in potential:
-                        potential[letter] = []
-                    new_letters = [l for l in word if l in pool and l not in existing_word]
-                    potential[letter].append(Word(word, existing_word, new_letters))
-    
-    # Sort words by length in descending order for each letter
-    for letter in potential:
-        potential[letter].sort(key=len, reverse=True)
-    
-    return potential
+        self.existing_words.append(word.word)
+        self.existing_word_counters[word.word] = Counter(word.word)
+        self.existing_word_bits[word.word] = self.calculate_word_bits(word.word)
+
+        letter_counts = Counter(word.pool_letters)
+        new_pool = []
+        for letter in self.pool:
+            if letter in letter_counts and letter_counts[letter] > 0:
+                letter_counts[letter] -= 1
+            else:
+                new_pool.append(letter)
+        self.pool = new_pool
+
+    def delete_letters(self, letters: str) -> None:
+        """Delete letters from the pool."""
+
+        for letter in letters.lower():
+            if letter in self.pool:
+                self.pool.remove(letter)
+
+    def get_possible_words(self) -> List[Word]:
+        """
+        Get all words that can be formed from the current pool of letters,
+        or from a combination of all the letters in an existing word and one or
+        more letters from the pool.
+
+        :return: A list of Word objects, sorted by length in descending order.
+        """
+
+        if not self.trie.root.children:
+            raise ValueError("Trie is empty. Make sure the wordlist is loaded.")
+
+        possible: List[Word] = []
+        pool_bits = self.calculate_word_bits(''.join(self.pool))
+        
+        # Find anagrams from the pool
+        for word in anagram(self, self.pool):
+            possible.append(Word(word, pool_letters=list(word)))
+        
+        # Check for words that can be formed using existing words
+        for existing_word in self.existing_words:
+            existing_bits = self.existing_word_bits[existing_word]
+            combined_bits = pool_bits | existing_bits
+            combined_letters = self.pool + list(existing_word)
+            for word in anagram(self, combined_letters):
+                word_bits = self.word_bits[word]
+                if len(word) > len(existing_word) and (word_bits & existing_bits) == existing_bits:
+                    new_letters = [l for l in word if l in self.pool and self.letter_to_bit[l] & (word_bits & ~existing_bits)]
+                    if new_letters:  # Ensure at least one letter from the pool is used
+                        possible.append(Word(word, existing_word, new_letters))
+        
+        return sorted(possible, key=len, reverse=True)
+
+    def get_potential_words(self) -> Dict[str, List[Word]]:
+        """
+        Get all words that could be formed from the current pool of letters,
+        or from a combination of all the letters in an existing word and one or
+        more letters from the pool, if one more letter was added to the pool.
+
+        :return: A dictionary with the missing letter as the key and a list of
+        Word objects sorted by length in descending order as the value.
+        """
+
+        if not self.trie.root.children:
+            raise ValueError("Trie is empty. Make sure the wordlist is loaded.")
+
+        potential_words: Dict[str, List[Word]] = {}
+        pool_bits = self.calculate_word_bits(''.join(self.pool))
+
+        def check_and_add_word(word: str, pool_bits: int, existing_word: Optional[str] = None):
+            word_bits = self.word_bits[word]
+            if existing_word:
+                existing_bits = self.existing_word_bits[existing_word]
+                if (word_bits & existing_bits) != existing_bits:
+                    return
+                if word_bits == existing_bits:  # No new letter used
+                    return
+            diff_bits = word_bits & ~pool_bits
+            if bin(diff_bits).count('1') == 1:
+                missing_letter = chr(diff_bits.bit_length() + 96)
+                new_letters = [l for l in word if l not in (existing_word or '') or self.letter_to_bit[l] & (word_bits & ~existing_bits)]
+                if new_letters:  # Ensure at least one new letter is used
+                    new_word = Word(word, existing_word, new_letters)
+                    potential_words.setdefault(missing_letter, []).append(new_word)
+
+        # Check potential words from the pool
+        for letter in set(SCRABBLE_LETTER_FREQUENCY.keys()) - set(self.pool):
+            temp_pool = self.pool + [letter]
+            temp_pool_bits = pool_bits | self.letter_to_bit[letter]
+            for word in anagram(self, temp_pool):
+                check_and_add_word(word, pool_bits)
+
+        # Check potential words from existing words
+        for existing_word in self.existing_words:
+            combined_bits = pool_bits | self.existing_word_bits[existing_word]
+            combined_letters = self.pool + list(existing_word)
+            for letter in set(SCRABBLE_LETTER_FREQUENCY.keys()) - set(combined_letters):
+                temp_combined = combined_letters + [letter]
+                temp_combined_bits = combined_bits | self.letter_to_bit[letter]
+                for word in anagram(self, temp_combined):
+                    if len(word) > len(existing_word):
+                        check_and_add_word(word, combined_bits, existing_word)
+
+        # Sort word lists by length in descending order
+        for letter in potential_words:
+            potential_words[letter].sort(key=len, reverse=True)
+
+        return potential_words
+
+    def serialize(self) -> str:
+        """Serialize the game state to a string."""
+
+        data = {
+            'letters': ''.join(self.pool),
+            'words': self.existing_words
+        }
+        json_str = json.dumps(data)
+        return base64.b64encode(json_str.encode('utf-8')).decode('utf-8')
+
+    def deserialize(self, data_str: str) -> 'GameState':
+        """Deserialize the game state from a string."""
+
+        try:
+            json_str = base64.b64decode(data_str.encode('utf-8')).decode('utf-8')
+            data = json.loads(json_str)
+            
+            # Add letters to the pool
+            self.add_letters(data['letters'])
+            
+            # Add existing words
+            self.add_existing_words(data['words'])
+            
+            return self
+        except (base64.binascii.Error, json.JSONDecodeError, KeyError):
+            raise ValueError("Invalid input format. Please use the exported format.")
+
 
 def get_wordlists() -> List[str]:
-    """
-    Get a list of available wordlist files in the './wordlists' directory.
+    """Get the wordlists from the wordlists directory."""
 
-    Returns:
-        List[str]: A sorted list of wordlist filenames (ending with .txt).
-
-    Raises:
-        FileNotFoundError: If the wordlists directory doesn't exist or contains no wordlists.
-    """
     if not os.path.exists('./wordlists'):
         raise FileNotFoundError("Wordlists directory not found.")
     
@@ -174,39 +273,39 @@ def get_wordlists() -> List[str]:
     
     return sorted(wordlists)
 
-def serialize_game_state(pool: List[str], existing_words: List[str]) -> str:
-    """
-    Convert the game state to a base64 encoded JSON string for clipboard.
 
-    Args:
-        pool (List[str]): List of available letters.
-        existing_words (List[str]): List of words already formed.
+def in_trie(trie: Trie, word: str) -> bool:
+    """Check if a word is in the trie."""
 
-    Returns:
-        str: A base64 encoded JSON string representing the game state.
-    """
-    data = {
-        'letters': ''.join(pool),
-        'words': existing_words
-    }
-    json_str = json.dumps(data)
-    return base64.b64encode(json_str.encode('utf-8')).decode('utf-8')
+    node = trie.root
+    for char in word:
+        if char not in node.children:
+            return False
+        node = node.children[char]
+    return node.is_word
 
-def deserialize_game_state(data_str: str) -> Tuple[List[str], List[str]]:
-    """
-    Convert a base64 encoded JSON string from clipboard to game state.
 
-    Args:
-        data_str (str): A base64 encoded JSON string representing the game state.
+def anagram(game_state: GameState, letters: List[str]) -> Generator[str, None, None]:
+    """Return (yield) all partial anagrams that can be formed from the letters."""
 
-    Returns:
-        Tuple[List[str], List[str]]: A tuple containing the pool and existing words.
-    """
-    try:
-        json_str = base64.b64decode(data_str.encode('utf-8')).decode('utf-8')
-        data = json.loads(json_str)
-        pool = [letter.lower() for letter in data['letters'] if letter.isalpha()]
-        existing_words = data['words']
-        return pool, existing_words
-    except (base64.binascii.Error, json.JSONDecodeError, KeyError):
-        raise ValueError("Invalid input format. Please use the exported format.")
+    if not game_state.trie.root.children:
+        raise ValueError("Trie is empty. Make sure the wordlist is loaded.")
+
+    def _anagram(letter_counts: Counter, path: List[str], node: TrieNode) -> Generator[str, None, None]:
+        """Find partial anagrams of the letters and counts in the Counter letter_counts."""
+        
+        if node.is_word:
+            yield ''.join(path)
+        
+        for letter, child in node.children.items():
+            count = letter_counts.get(letter, 0)
+            if count == 0:
+                continue
+            letter_counts[letter] -= 1
+            path.append(letter)
+            yield from _anagram(letter_counts, path, child)
+            path.pop()
+            letter_counts[letter] += 1
+
+    letter_counts = Counter(letters)
+    yield from _anagram(letter_counts, [], game_state.trie.root)

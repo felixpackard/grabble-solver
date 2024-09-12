@@ -1,24 +1,23 @@
 import urwid
-from typing import Dict, List, Set
+from typing import Dict, List
 from grabble_logic import (
-    get_possible_words, get_potential_words, get_wordlists, load_wordlist, Word,
-    serialize_game_state, deserialize_game_state
+    GameState, get_wordlists, Word
 )
 import pyperclip
-
 class GrabbleUI:
     def __init__(self) -> None:
-        self.pool: List[str] = []
-        self.existing_words: List[str] = []
-        self.wordlist: Set[str] = set()
+        self.game_state = GameState()
+        self.is_wordlist_selection = True
         self.setup_ui()
 
     def setup_ui(self) -> None:
         self.wordlist_selector: urwid.Widget = self.create_wordlist_selector()
         self.main_view: urwid.Widget = self.create_main_view()
         
-        # Define the palette here
-        self.palette = [('possible_words', 'light green,bold', 'default')]
+        self.palette = [
+            ('possible_words', 'light green,bold', 'default'),
+            ('potential_words', 'yellow,bold', 'default'),
+        ]
         
         self.loop: urwid.MainLoop = urwid.MainLoop(self.wordlist_selector, unhandled_input=self.global_input, palette=self.palette)
         self.loop.run()
@@ -35,9 +34,18 @@ class GrabbleUI:
         return urwid.Filler(urwid.Padding(box, 'center', ('relative', 50)))
 
     def on_wordlist_chosen(self, button: urwid.Button, choice: str) -> None:
-        self.wordlist = load_wordlist(f"./wordlists/{choice}")
-        self.loop.widget = self.main_view
-        self.update_display()
+        loading_text = urwid.Text("Loading wordlist... Please wait.")
+        loading_filler = urwid.Filler(urwid.Padding(loading_text, align='center', width='pack'))
+        centered_loading = urwid.Padding(loading_filler, align='center', width='pack')
+        self.loop.widget = centered_loading
+        
+        def load_wordlist():
+            self.game_state.load_wordlist(f"./wordlists/{choice}")
+            self.loop.widget = self.main_view
+            self.is_wordlist_selection = False
+            self.update_display()
+        
+        self.loop.set_alarm_in(0.1, lambda loop, user_data: load_wordlist())
 
     def create_main_view(self) -> urwid.Widget:
         self.word_pool: urwid.Text = urwid.Text("")
@@ -69,21 +77,42 @@ class GrabbleUI:
         return layout
 
     def update_display(self) -> None:
-        self.word_pool.set_text(", ".join(self.existing_words))
-        self.letter_pool.set_text(" ".join(self.pool))
+        self.word_pool.set_text(", ".join(self.game_state.existing_words))
+        self.letter_pool.set_text(" ".join(self.game_state.pool))
 
-        potential: Dict[str, List[Word]] = get_potential_words(self.pool, self.wordlist, self.existing_words)
-        potential_text: str = "\n".join(f"{letter}: {', '.join(str(w) for w in words)}" for letter, words in potential.items())
+        potential: Dict[str, List[Word]] = self.game_state.get_potential_words()
+        potential_text: List[List] = []
+        for i, (letter, words) in enumerate(potential.items()):
+            if i >= 10:
+                potential_text.append("\n")
+                potential_text.append("...")
+                break
+            word_list = [('potential_words', letter + ": ")]
+            if words:
+                word_list.extend([('potential_words', str(words[0])), ", "])
+                word_list.extend([str(w) + ", " for w in words[1:3]])
+            if len(words) > 3:
+                word_list.append("...")
+            potential_text.append(word_list)
+            if i < 9 and i < len(potential) - 1:  # Add line break if not the last item
+                potential_text.append("\n")
         self.potential_words.set_text(potential_text)
 
-        possible: List[Word] = get_possible_words(self.pool, self.wordlist, self.existing_words)
-        possible_text: str = "\n".join(f"{i+1}. {str(word)}" for i, word in enumerate(possible))
-        self.possible_words.original_widget.set_text(possible_text)
+        possible: List[Word] = self.game_state.get_possible_words()
+        possible_text: List[str] = [f"{i+1}. {str(word)}" for i, word in enumerate(possible[:10])]
+        if len(possible) > 10:
+            possible_text.append("...")
+        self.possible_words.original_widget.set_text("\n".join(possible_text))
 
         actions_text: str = "a: Add Letter\nr: Remove Word\nd: Delete Letters\ni: Import State\ne: Export State\nq: Quit"
         self.actions.set_text(actions_text)
 
     def global_input(self, key: str) -> None:
+        if self.is_wordlist_selection:
+            if key in ('q', 'Q'):
+                raise urwid.ExitMainLoop()
+            return
+
         if key in ('q', 'Q'):
             raise urwid.ExitMainLoop()
         elif key in ('a', 'A'):
@@ -95,9 +124,9 @@ class GrabbleUI:
         elif key in ('d', 'D'):
             self.prompt_input("Enter letters to remove:", self.delete_letters)
         elif key in ('i', 'I'):
-            self.prompt_input("Enter letters to import:", self.import_letters)
+            self.prompt_input("Paste exported state:", self.import_state)
         elif key in ('e', 'E'):
-            self.export_letters()
+            self.export_state()
 
     def prompt_input(self, prompt: str, callback: callable, validator: callable = None) -> None:
         edit = urwid.Edit(prompt + " ")
@@ -117,15 +146,16 @@ class GrabbleUI:
             elif key == 'esc':
                 reset_widget()
 
-        input_box = urwid.LineBox(edit)
+        # Create a horizontally scrollable edit widget
+        edit_box = urwid.BoxAdapter(urwid.Filler(edit), height=1)
+        scrollable_edit = urwid.Columns([('weight', 1, edit_box)], dividechars=1, min_width=1)
+        input_box = urwid.LineBox(scrollable_edit)
         
-        # Create a Pile with a blank space and the input box
         bottom_pile = urwid.Pile([
-            urwid.BoxAdapter(urwid.SolidFill(), height=1),  # Add some space
+            urwid.BoxAdapter(urwid.SolidFill(), height=1),
             ('pack', input_box)
         ])
         
-        # Create an Overlay that aligns the input box to the bottom center
         overlay = urwid.Overlay(
             bottom_pile,
             self.main_view,
@@ -139,28 +169,15 @@ class GrabbleUI:
         self.loop.unhandled_input = handle_input
 
     def add_letter(self, letter: str) -> None:
-        self.pool.append(letter.lower())
+        self.game_state.add_letter(letter)
         self.update_display()
 
     def remove_word(self, index: str) -> None:
         try:
             index = int(index) - 1
-            possible: List[Word] = get_possible_words(self.pool, self.wordlist, self.existing_words)
+            possible: List[Word] = self.game_state.get_possible_words()
             if 0 <= index < len(possible):
-                word: Word = possible[index]
-                if word.existing_word:
-                    self.existing_words.remove(word.existing_word)
-                    self.existing_words.append(word.word)
-                    # Remove only the letters that are not from the existing word
-                    letters_to_remove: Set[str] = set(word.word) - set(word.existing_word)
-                    for letter in letters_to_remove:
-                        if letter in self.pool:
-                            self.pool.remove(letter)
-                else:
-                    self.existing_words.append(word.word)
-                    for letter in word.pool_letters:
-                        if letter in self.pool:
-                            self.pool.remove(letter)
+                self.game_state.remove_word(possible[index])
             else:
                 self.show_popup(f"Invalid index. Please enter a number between 1 and {len(possible)}.")
             self.update_display()
@@ -168,20 +185,18 @@ class GrabbleUI:
             self.show_popup("Invalid input. Please enter a valid number.")
 
     def delete_letters(self, letters: str) -> None:
-        for letter in letters.lower():
-            if letter in self.pool:
-                self.pool.remove(letter)
+        self.game_state.delete_letters(letters)
         self.update_display()
 
-    def import_letters(self, input_str: str) -> None:
+    def import_state(self, input_str: str) -> None:
         try:
-            self.pool, self.existing_words = deserialize_game_state(input_str)
+            self.game_state = self.game_state.deserialize(input_str)
             self.update_display()
         except ValueError as e:
             self.show_popup(str(e))
 
-    def export_letters(self) -> None:
-        exported = serialize_game_state(self.pool, self.existing_words)
+    def export_state(self) -> None:
+        exported = self.game_state.serialize()
         pyperclip.copy(exported)
         self.show_popup(f"Exported data: {exported}\n\nCopied to clipboard!")
 
