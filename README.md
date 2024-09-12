@@ -27,7 +27,7 @@ When no more words can be found, the game is scored by counting the first three 
 - [x] Manage letter pool and existing words
 - [x] Import and export game state
 - [x] User-friendly terminal interface
-- [ ] Optimised performance for large wordlists
+- [x] Optimised performance for large wordlists
 - [ ] Intelligently discards illegal moves such as adding 's' or 'er' to the end of a word
 
 ## Installation
@@ -81,7 +81,7 @@ The interface will guide you through the following steps:
 
 ## Disclaimer
 
-The initial prototype of this was written in a few hours almost entirely using AI, and as such is not very efficient, but was enough to solve my specific use case with a small wordlist. When I have some more time I'll refactor it to make it more efficient for larger wordlists.
+The initial prototype of this was written in a few hours almost entirely using AI, and as such was not very efficient. I have since refactored it to improve efficiency, but there may still be some inefficiencies or poor quality code left over from the initial implementation.
 
 ## Testing
 
